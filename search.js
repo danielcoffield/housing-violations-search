@@ -1,6 +1,3 @@
-// Loads the pre-generated violations.json once, then does all
-// filtering/searching client-side. No backend involved.
-
 const DATA_URL = "data/violations.json";
 const DEFAULT_VIEW_LIMIT = 40;
 const SEARCH_RESULT_LIMIT = 60;
@@ -26,10 +23,7 @@ function getUnitBounds() {
   };
 }
 
-// A unit_count of 0 isn't a real building size (see the comment in
-// annotateHazardCounts below) — treat it the same as "unknown" so a
-// "0–5 units" search doesn't surface SRO/hotel records with a fabricated
-// zero. When no range is set at all, every building passes, same as before.
+
 function matchesUnitRange(unitCount) {
   const { min, max } = getUnitBounds();
   if (min == null && max == null) return true;
@@ -45,15 +39,6 @@ function unitRangeNote() {
   return ` · ${min ?? 0}–${max ?? "∞"} units`;
 }
 
-// Which violation classes count at all. Defaults to A/B/C, matching the
-// original CLI's class prompt — unchecking all of them means "show
-// nothing" (an explicit user choice), not "ignore the filter."
-//
-// Browsers sometimes restore checkbox states from a previous visit on a
-// plain reload, overriding the HTML's declared "checked" default. Force
-// the intended default here, then read the filter state FROM the actual
-// checkboxes — so the visible checkboxes and this script's filtering
-// logic can never silently disagree with each other.
 document.querySelectorAll(".f-class").forEach((cb) => {
   cb.checked = true;
 });
@@ -140,11 +125,6 @@ function formatDensity(b) {
   return `${b.hazard_apartment_count} of ${b.unit_count} unit${b.unit_count === 1 ? "" : "s"} affected (<b>${pct}%</b>)`;
 }
 
-// Returns only the apartments (and, within them, only the violations)
-// whose class is currently selected, plus the resulting count/density.
-// Recomputed on every render rather than cached, since the class filter
-// can change at any time — this is what keeps the density percentage and
-// the actual displayed violation list in agreement with each other.
 function filteredBuildingView(b) {
   const apartments = [];
   for (const apt of b.apartments) {
@@ -156,18 +136,6 @@ function filteredBuildingView(b) {
   return { apartments, count, density };
 }
 
-// Replicates the original CLI's make_summary() exactly: sort candidates by
-// raw apartment count first, keep only the top (limit * 3), then re-sort
-// that narrowed set by density. Ties at the density stage just inherit
-// their relative order from the raw-count sort (stable sort) — same as
-// the original, no separate tiebreak rule needed.
-//
-// One deliberate deviation: unit_count of 0/unknown sorts to the bottom
-// (via hazard_density_score being null) instead of being used as a literal
-// denominator. The original CLI divided by it directly, which for real
-// SRO/rooming-house PLUTO records (unitsres = 0) produces a divide-by-zero
-// and an effectively infinite, meaningless percentage — a bug, not
-// something worth reproducing.
 function rankBuildings(candidates, limit) {
   const preFiltered = [...candidates]
     .sort((a, b) => b.hazard_apartment_count - a.hazard_apartment_count)
@@ -240,12 +208,6 @@ function buildingCard(b, apartments, matchedViolationIds) {
     </details>`;
 }
 
-// JustFix's "Who Owns What" needs the address split into house number and
-// street name, both uppercase, with the borough — e.g.
-// https://whoownswhat.justfix.org/en/address/BROOKLYN/753/MAC%20DONOUGH%20STREET
-// Our stored `address` is "753 Mac Donough Street" (capitalized for
-// display), so split on the first space to recover the house number and
-// re-uppercase the rest for the street name.
 function buildJustFixUrl(boro, address) {
   const parts = address.trim().split(/\s+/);
   const houseNumber = parts[0] ?? "";
@@ -263,10 +225,6 @@ function escapeHtml(s) {
   }[c]));
 }
 
-// Highlights the literal words the person typed, wherever they appear as
-// real contiguous text — deliberately NOT using Fuse's fuzzy match indices,
-// which reflect scattered characters that contributed to its approximate
-// scoring rather than a clean substring a human would recognize.
 function highlightQuery(text, query) {
   const words = query.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return escapeHtml(text);
@@ -328,9 +286,6 @@ function runSearch(query) {
     });
   }
 
-  // The density shown must reflect only the apartments that matched THIS
-  // search — not the building's overall hazard stats — or the percentage
-  // in the header won't agree with the violation list underneath it.
   const candidates = Array.from(byBbl.values()).map((entry) => {
     const count = entry.apartments.size;
     const density = entry.unit_count != null && entry.unit_count > 0 ? count / entry.unit_count : null;
@@ -406,10 +361,6 @@ document.querySelectorAll(".hint button").forEach((btn) => {
   });
 });
 
-// Only one building's violation list open at a time. The 'toggle' event
-// doesn't bubble, but a capture-phase listener on an ancestor still catches
-// it on the way down — so one listener here works for every card, including
-// ones added later by re-renders, since resultsEl itself is never replaced.
 resultsEl.addEventListener(
   "toggle",
   (e) => {
