@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NYC Housing Violations — search by issue</title>
+  <meta name="description"
+    content="Search the last 30 days of NYC HPD housing violations by issue — mice, mold, no heat, and more." />
+  <style>
+    :root {
+      --bg: #FAF8F4;
+      --ink: #242323;
+      --ink-soft: #555555;
+      --line: #242323;
+      --sans: ui-monospace, "SF Mono", "Cascadia Code", "Consolas", "Roboto Mono", "Menlo", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.5;
+    }
+
+    a {
+      color: var(--ink);
+    }
+
+    .wrap {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 56px 20px 80px;
+    }
+
+    header {
+      margin-bottom: 32px;
+    }
+
+    .eyebrow {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      margin: 0 0 10px;
+    }
+
+    h1 {
+      font-weight: 800;
+      font-size: clamp(30px, 6vw, 42px);
+      letter-spacing: -0.02em;
+      line-height: 1.05;
+      margin: 0 0 14px;
+      color: var(--ink);
+    }
+
+    .sub {
+      font-size: 16px;
+      color: var(--ink-soft);
+      max-width: 52ch;
+    }
+
+    .sub strong {
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .search-row {
+      margin: 32px 0 12px;
+    }
+
+    #q {
+      width: 100%;
+      font-family: var(--sans);
+      font-size: 18px;
+      padding: 16px 18px;
+      border: 2px solid var(--ink);
+      background: #FAF8F4;
+      color: var(--ink);
+      border-radius: 0;
+    }
+
+    #q::placeholder {
+      color: #999999;
+    }
+
+    #q:focus {
+      outline: none;
+      box-shadow: inset 0 0 0 1px var(--ink);
+    }
+
+    .hint {
+      font-size: 13px;
+      color: var(--ink-soft);
+      margin: 0 0 36px;
+    }
+
+    .hint button {
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 600;
+      background: none;
+      border: none;
+      color: var(--ink);
+      padding: 3px 0;
+      margin-right: 14px;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .hint button:hover {
+      opacity: 0.6;
+    }
+
+    .range-row {
+      margin: 0 0 24px;
+      font-size: 13px;
+      color: var(--ink-soft);
+    }
+
+    .range-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .range-row input[type="number"] {
+      width: 80px;
+      font-family: var(--sans);
+      font-size: 14px;
+      padding: 6px 8px;
+      border: 1px solid var(--ink);
+      background: var(--bg);
+      color: var(--ink);
+      border-radius: 0;
+    }
+
+    fieldset.filters {
+      border: none;
+      padding: 0;
+      margin: 0 0 18px;
+    }
+
+    fieldset.filters legend {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      padding: 0 0 6px;
+    }
+
+    fieldset.filters label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--ink);
+      margin: 0 16px 6px 0;
+      cursor: pointer;
+    }
+
+    fieldset.filters input[type="checkbox"] {
+      accent-color: var(--ink);
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+    }
+
+    #status {
+      font-size: 13px;
+      color: var(--ink-soft);
+      margin-bottom: 20px;
+      min-height: 18px;
+    }
+
+    details.card {
+      border-top: 1px solid var(--line);
+      padding: 14px 0;
+    }
+
+    details.card:first-of-type {
+      border-top: none;
+    }
+
+    summary.card-top {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    summary.card-top::-webkit-details-marker {
+      display: none;
+    }
+
+    summary.card-top::before {
+      content: "+";
+      font-weight: 700;
+      margin-right: 8px;
+      display: inline-block;
+      width: 0.8em;
+    }
+
+    details[open] summary.card-top::before {
+      content: "–";
+    }
+
+    .address {
+      font-weight: 700;
+      font-size: 17px;
+      color: var(--ink);
+    }
+
+    .meta {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      white-space: nowrap;
+    }
+
+    .density {
+      font-size: 13px;
+      color: var(--ink-soft);
+      margin-top: 3px;
+    }
+
+    .density b {
+      color: var(--ink);
+    }
+
+    .viol-list {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px dashed var(--line);
+    }
+
+    .viol {
+      padding: 6px 0;
+      font-size: 14px;
+    }
+
+    .viol-tag {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 11px;
+      color: var(--ink-soft);
+      margin-right: 6px;
+    }
+
+    .viol-apt {
+      font-weight: 700;
+      font-size: 12px;
+      color: var(--ink-soft);
+      margin-right: 6px;
+    }
+
+    mark {
+      background: var(--ink);
+      color: var(--bg);
+      padding: 0 2px;
+    }
+
+    .empty {
+      font-size: 14px;
+      color: var(--ink-soft);
+      padding: 40px 0;
+      text-align: center;
+    }
+
+    footer {
+      margin-top: 56px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+      color: var(--ink-soft);
+    }
+
+    footer a {
+      text-decoration: underline;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Housing Violations Search</h1>
+      <p class="sub">
+        Search recent NYC housing violations by issue —
+        <strong>mice</strong>, <strong>mold</strong>, <strong>no heat</strong>, whatever you're dealing with.
+        Buildings are ranked by violations per apartment, relative to building size.
+      </p>
+    </header>
+
+    <div class="search-row">
+      <input id="q" type="text" placeholder="Search an issue, address, or apartment…" autocomplete="off" />
+    </div>
+
+    <p class="hint">
+      <button data-q="mice">Mice</button>
+      <button data-q="rats">Rats</button>
+      <button data-q="mold">Mold</button>
+      <button data-q="no heat">No Heat</button>
+      <button data-q="roaches">Roaches</button>
+      <button data-q="fire damage">Fire Damage</button>
+      <button data-q="lead paint">Lead Paint</button>
+    </p>
+
+    <fieldset class="filters">
+      <legend>Class</legend>
+      <label><input type="checkbox" class="f-class" value="A" checked> A — non-hazardous</label>
+      <label><input type="checkbox" class="f-class" value="B" checked> B — hazardous</label>
+      <label><input type="checkbox" class="f-class" value="C" checked> C — immediately hazardous</label>
+    </fieldset>
+
+    <div class="range-row">
+      <label>Units:
+        <input id="min-units" type="number" min="0" placeholder="min" />
+      </label>
+      to
+      <label>
+        <input id="max-units" type="number" min="0" placeholder="max" />
+      </label>
+    </div>
+
+    <p id="status">Loading violations data…</p>
+    <div id="results"></div>
+
+    <footer>
+      Data: NYC Open Data, HPD Housing Maintenance Code violations. Not affiliated with HPD or the City of New York.
+      Snapshot generated <span id="gen-date">—</span>, covering the prior <span id="days-back">30</span> days.
+    </footer>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/6.6.2/fuse.min.js"></script>
+  <script src="search.js"></script>
+</body>
+
+</html>

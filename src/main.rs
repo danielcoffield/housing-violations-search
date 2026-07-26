@@ -1,10 +1,8 @@
-use chrono::{Duration, Local};
-use comfy_table::{Attribute, Cell, Color, Table};
+use chrono::{Duration, Local, Utc};
 use indicatif;
-use inquire::{CustomType, MultiSelect, Select};
 use reqwest;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 mod bbl;
 
@@ -13,7 +11,10 @@ struct Config {
     api_token: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+const DAYS_BACK: i64 = 90;
+const OUTPUT_PATH: &str = "data/violations.json";
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 struct Violation {
     #[serde(rename = "violationid")]
     violation_id: String,
@@ -28,9 +29,12 @@ struct Violation {
     boro: String,
     block: String,
     lot: String,
+    #[serde(rename = "novdescription")]
+    description: Option<String>,
+    bin: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
 #[serde(rename_all = "UPPERCASE")]
 enum ViolationClass {
     A,
@@ -40,70 +44,45 @@ enum ViolationClass {
     Other,
 }
 
+impl ViolationClass {
+    fn as_str(&self) -> &'static str {
+        match self {
+            ViolationClass::A => "A",
+            ViolationClass::B => "B",
+            ViolationClass::C => "C",
+            ViolationClass::Other => "Other",
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_str = std::fs::read_to_string("config.toml").expect("Config.toml not found!");
     let config: Config = toml::from_str(&config_str).expect("Invalid config.toml");
 
-    let violation_classes = MultiSelect::new(
-        "Search violation classes:",
-        vec![
-            "A, Non-Hazardous",
-            "B, Hazardous",
-            "C, Immediately Hazardous",
-        ],
-    )
-    .prompt()?;
+    let violations = fetch_violations(DAYS_BACK, &config.api_token)?;
+    let by_building = group_by_building(&violations);
 
-    let num_buildings: usize = CustomType::new("Return how many buildings?:").prompt()?;
-    let days_back: i64 = CustomType::new("Search how many days back?:").prompt()?;
-    let violations = fetch_violations(violation_classes, days_back, &config.api_token)?;
-    let selected_address = make_summary(&violations, num_buildings, &config.api_token)?;
+    let bbls: Vec<String> = by_building.keys().cloned().collect();
+    let unit_counts = get_units_per_building(bbls, &config.api_token)?;
 
-    get_details(&selected_address, &violations)?;
+    let buildings = build_output(by_building, &unit_counts);
+
+    let site_data = SiteData {
+        generated_at: Utc::now().to_rfc3339(),
+        days_back: DAYS_BACK,
+        buildings,
+    };
+
+    let json = serde_json::to_string_pretty(&site_data)?;
+    if let Some(parent) = std::path::Path::new(OUTPUT_PATH).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(OUTPUT_PATH, json)?;
 
     Ok(())
 }
 
-fn make_summary(
-    violations: &[Violation],
-    num_buildings: usize,
-    api_token: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let output = sum_apartments(&violations);
-    let mut output: Vec<_> = output.iter().collect();
-
-    output.sort_by(|a, b| b.1.2.len().cmp(&a.1.2.len()));
-    output.truncate(num_buildings * 3);
-
-    let bbls: Vec<String> = output.iter().map(|(bbl, _)| bbl.to_string()).collect();
-    let unit_counts = get_units_per_building(bbls, api_token)?;
-
-    output.sort_by(|a, b| {
-        let units_a = *unit_counts.get(a.0).unwrap_or(&1) as f32;
-        let units_b = *unit_counts.get(b.0).unwrap_or(&1) as f32;
-        let score_a = a.1.2.len() as f32 / units_a;
-        let score_b = b.1.2.len() as f32 / units_b;
-        score_b.partial_cmp(&score_a).unwrap()
-    });
-
-    output.truncate(num_buildings);
-
-    let options: Vec<String> = output
-        .iter()
-        .map(|(bbl, (_bbl, address, apartments))| {
-            let units = *unit_counts.get(*bbl).unwrap_or(&1);
-            let pct = (apartments.len() as f32 / units as f32 * 100.0).round() as u32;
-            format!("{} ({}, {}%)", address, apartments.len(), pct)
-        })
-        .collect();
-
-    let selection = Select::new("Select a building for details:", options).prompt()?;
-    let selected_address = selection.split(" (").next().unwrap();
-    Ok(selected_address.to_string())
-}
-
 fn fetch_violations(
-    violation_classes: Vec<&str>,
     days_back: i64,
     api_token: &str,
 ) -> Result<Vec<Violation>, Box<dyn std::error::Error>> {
@@ -154,102 +133,151 @@ fn fetch_violations(
         offset += 1000;
     }
 
-    let mut filtered_violations = all_violations;
-
-    filtered_violations.retain(|v| {
-        v.apartment.is_some() && {
-            let class_str = match v.class {
-                ViolationClass::A => "A, Non-Hazardous",
-                ViolationClass::B => "B, Hazardous",
-                ViolationClass::C => "C, Immediately Hazardous",
-                ViolationClass::Other => "",
-            };
-            violation_classes.contains(&class_str)
-        }
-    });
-
     spinner.finish_and_clear();
 
-    Ok(filtered_violations)
+    all_violations.retain(|v| v.apartment.is_some());
+
+    Ok(all_violations)
 }
 
-fn get_details(address: &str, violations: &[Violation]) -> Result<(), Box<dyn std::error::Error>> {
-    let details: Vec<&Violation> = violations
-        .iter()
-        .filter(|v| format!("{} {}", v.house_number, capitalize(&v.street_name)) == address)
+struct BuildingAccumulator {
+    address: String,
+    boro: String,
+    // Not every violation record carries a BIN (older/ungeocoded entries
+    // sometimes lack one) even when other violations for the same building
+    // do — so this is filled in opportunistically as records are grouped,
+    // rather than assumed from just the first violation seen.
+    bin: Option<String>,
+    apartments: HashMap<String, Vec<Violation>>,
+}
+
+fn group_by_building(violations: &[Violation]) -> HashMap<String, BuildingAccumulator> {
+    let mut buildings: HashMap<String, BuildingAccumulator> = HashMap::new();
+
+    for v in violations {
+        let bbl = bbl::construct_bbl(&v.boro, &v.block, &v.lot);
+        let address = format!("{} {}", v.house_number, capitalize(&v.street_name));
+        let apartment = v.apartment.clone().unwrap();
+
+        let entry = buildings
+            .entry(bbl.clone())
+            .or_insert_with(|| BuildingAccumulator {
+                address,
+                boro: v.boro.clone(),
+                bin: v.bin.clone(),
+                apartments: HashMap::new(),
+            });
+
+        if entry.bin.is_none() {
+            entry.bin = v.bin.clone();
+        }
+
+        entry
+            .apartments
+            .entry(apartment)
+            .or_insert_with(Vec::new)
+            .push(v.clone());
+    }
+
+    buildings
+}
+
+#[derive(Serialize)]
+struct SiteData {
+    generated_at: String,
+    days_back: i64,
+    buildings: Vec<BuildingOutput>,
+}
+
+#[derive(Serialize)]
+struct BuildingOutput {
+    bbl: String,
+    address: String,
+    boro: String,
+    unit_count: Option<u32>,
+    apartment_count: usize,
+    density_score: Option<f32>,
+    apartments: Vec<ApartmentOutput>,
+    // None when no violation for this building had a BIN. The frontend
+    // falls back to plain (non-linked) text in that case rather than
+    // building a broken HPD Online link.
+    bin: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ApartmentOutput {
+    apartment: String,
+    violations: Vec<ViolationOutput>,
+}
+
+#[derive(Serialize)]
+struct ViolationOutput {
+    violation_id: String,
+    class: String,
+    approved_date: String,
+    description: String,
+}
+
+fn build_output(
+    by_building: HashMap<String, BuildingAccumulator>,
+    unit_counts: &HashMap<String, u32>,
+) -> Vec<BuildingOutput> {
+    let mut buildings: Vec<BuildingOutput> = by_building
+        .into_iter()
+        .map(|(bbl, acc)| {
+            let unit_count = unit_counts.get(&bbl).copied();
+            let apartment_count = acc.apartments.len();
+
+            let density_score = unit_count.and_then(|units| {
+                if units == 0 {
+                    None
+                } else {
+                    Some(apartment_count as f32 / units as f32)
+                }
+            });
+
+            let apartments = acc
+                .apartments
+                .into_iter()
+                .map(|(apartment, mut viols)| {
+                    viols.sort_by(|a, b| b.approved_date.cmp(&a.approved_date));
+                    let violations = viols
+                        .into_iter()
+                        .map(|v| ViolationOutput {
+                            violation_id: v.violation_id,
+                            class: v.class.as_str().to_string(),
+                            approved_date: v.approved_date,
+                            description: v.description.unwrap_or_default(),
+                        })
+                        .collect();
+                    ApartmentOutput {
+                        apartment,
+                        violations,
+                    }
+                })
+                .collect();
+
+            BuildingOutput {
+                bbl,
+                address: acc.address,
+                boro: acc.boro,
+                unit_count,
+                apartment_count,
+                density_score,
+                apartments,
+                bin: acc.bin,
+            }
+        })
         .collect();
 
-    let mut by_apartment: HashMap<String, Vec<&Violation>> = HashMap::new();
-    for v in &details {
-        by_apartment
-            .entry(v.apartment.clone().unwrap())
-            .or_insert_with(Vec::new)
-            .push(v);
-    }
+    buildings.sort_by(|a, b| match (a.density_score, b.density_score) {
+        (Some(x), Some(y)) => y.partial_cmp(&x).unwrap(),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => b.apartment_count.cmp(&a.apartment_count),
+    });
 
-    let mut apts: Vec<_> = by_apartment.iter().collect();
-
-    apts.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
-
-    let max_violations = apts.first().map(|(_, v)| v.len()).unwrap_or(1);
-    let top_third = max_violations * 2 / 3;
-    let mid_third = max_violations / 3;
-
-    let mut table = Table::new();
-    table.set_header(vec![
-        Cell::new("Apartment").add_attribute(Attribute::Bold),
-        Cell::new("Violations").add_attribute(Attribute::Bold),
-        Cell::new("Classes").add_attribute(Attribute::Bold),
-    ]);
-
-    for (apt, viols) in &apts {
-        let mut class_counts: HashMap<String, usize> = HashMap::new();
-        for v in *viols {
-            *class_counts.entry(format!("{:?}", v.class)).or_insert(0) += 1;
-        }
-        let mut counts: Vec<String> = class_counts
-            .iter()
-            .map(|(class, count)| format!("{}{}", count, class))
-            .collect();
-        counts.sort();
-
-        let color = if viols.len() >= top_third {
-            Color::Red
-        } else if viols.len() >= mid_third {
-            Color::AnsiValue(208)
-        } else {
-            Color::Yellow
-        };
-
-        table.add_row(vec![
-            Cell::new(format!("{}", apt))
-                .fg(color)
-                .add_attribute(Attribute::Bold),
-            Cell::new(viols.len()).fg(color),
-            Cell::new(counts.join(", ")).fg(color),
-        ]);
-    }
-
-    println!("{table}");
-    Ok(())
-}
-
-fn sum_apartments(violations: &[Violation]) -> HashMap<String, (String, String, HashSet<String>)> {
-    let mut distinct_buildings = HashMap::new();
-    for violation in violations {
-        let address = format!(
-            "{} {}",
-            violation.house_number,
-            capitalize(&violation.street_name)
-        );
-        let bbl = bbl::construct_bbl(&violation.boro, &violation.block, &violation.lot);
-        distinct_buildings
-            .entry(bbl.clone())
-            .or_insert_with(|| (bbl.clone(), address, HashSet::new()))
-            .2
-            .insert(violation.apartment.clone().unwrap());
-    }
-    distinct_buildings
+    buildings
 }
 
 fn capitalize(s: &str) -> String {
