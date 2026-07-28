@@ -9,7 +9,7 @@ const minUnitsEl = document.getElementById("min-units");
 const maxUnitsEl = document.getElementById("max-units");
 
 let buildings = [];
-let flatRecords = []; // one entry per violation, carrying its parent building info
+let flatRecords = [];
 let fuse = null;
 
 function getUnitBounds() {
@@ -45,6 +45,18 @@ document.querySelectorAll(".f-class").forEach((cb) => {
 let selectedClasses = new Set(
   Array.from(document.querySelectorAll(".f-class:checked")).map((el) => el.value)
 );
+
+document.querySelectorAll(".f-boro").forEach((cb) => {
+  cb.checked = true;
+});
+let selectedBoros = new Set(
+  Array.from(document.querySelectorAll(".f-boro:checked")).map((el) => el.value)
+);
+
+function boroNote() {
+  if (selectedBoros.size === 5) return "";
+  return selectedBoros.size ? ` · ${[...selectedBoros].join("/")}` : " · no borough selected";
+}
 
 function classNote() {
   const sorted = [...selectedClasses].sort();
@@ -153,6 +165,7 @@ function renderDefault() {
   const entries = [];
   for (const b of buildings) {
     if (!matchesUnitRange(b.unit_count)) continue;
+    if (!selectedBoros.has(b.boro)) continue;
     const { apartments, count, density } = filteredBuildingView(b);
     if (count === 0) continue;
     entries.push({
@@ -170,8 +183,8 @@ function renderDefault() {
   const top = rankBuildings(entries, DEFAULT_VIEW_LIMIT);
 
   statusEl.textContent = entries.length
-    ? `${entries.length.toLocaleString()} buildings${unitRangeNote()}${classNote()} — showing highest violations-per-unit first.`
-    : `No buildings match the current filters${unitRangeNote()}${classNote()}.`;
+    ? `${entries.length.toLocaleString()} buildings${unitRangeNote()}${classNote()}${boroNote()} — showing highest violations-per-unit first.`
+    : `No buildings match the current filters${unitRangeNote()}${classNote()}${boroNote()}.`;
 
   resultsEl.innerHTML = top.map((b) => buildingCard(b, b.apartments)).join("");
 }
@@ -250,18 +263,14 @@ function runSearch(query) {
   }
 
   const hits = searchRecords(query)
-    .filter((hit) => matchesUnitRange(hit.item.unit_count) && selectedClasses.has(hit.item.class));
+    .filter((hit) => matchesUnitRange(hit.item.unit_count) && selectedClasses.has(hit.item.class) && selectedBoros.has(hit.item.boro));
 
   if (!hits.length) {
-    statusEl.textContent = `No matches for "${query}"${unitRangeNote()}${classNote()}.`;
+    statusEl.textContent = `No matches for "${query}"${unitRangeNote()}${classNote()}${boroNote()}.`;
     resultsEl.innerHTML = `<div class="empty">No violations matched "${escapeHtml(query)}" with the current filters. Try a broader term or fewer filters.</div>`;
     return;
   }
 
-  // Group matching violation records back up by building, keeping only
-  // the apartments/violations that actually matched. Highlighting is
-  // computed separately from the raw query (see highlightQuery), not
-  // from Fuse's match indices.
   const byBbl = new Map();
   for (const hit of hits) {
     const rec = hit.item;
@@ -298,7 +307,7 @@ function runSearch(query) {
     return;
   }
 
-  statusEl.textContent = `${grouped.length} building${grouped.length === 1 ? "" : "s"} matching "${query}"${unitRangeNote()}${classNote()} (of ${buildings.length.toLocaleString()} total).`;
+  statusEl.textContent = `${grouped.length} building${grouped.length === 1 ? "" : "s"} matching "${query}"${unitRangeNote()}${classNote()}${boroNote()} (of ${buildings.length.toLocaleString()} total).`;
 
   resultsEl.innerHTML = grouped
     .map((building) => {
@@ -346,6 +355,15 @@ document.querySelectorAll(".f-class").forEach((cb) => {
   cb.addEventListener("change", () => {
     selectedClasses = new Set(
       Array.from(document.querySelectorAll(".f-class:checked")).map((el) => el.value)
+    );
+    runSearch(qEl.value);
+  });
+});
+
+document.querySelectorAll(".f-boro").forEach((cb) => {
+  cb.addEventListener("change", () => {
+    selectedBoros = new Set(
+      Array.from(document.querySelectorAll(".f-boro:checked")).map((el) => el.value)
     );
     runSearch(qEl.value);
   });
