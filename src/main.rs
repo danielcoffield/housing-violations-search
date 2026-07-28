@@ -11,7 +11,7 @@ struct Config {
     api_token: String,
 }
 
-const DAYS_BACK: i64 = 90;
+const DAYS_BACK: i64 = 365;
 const OUTPUT_PATH: &str = "data/violations.json";
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_str = std::fs::read_to_string("config.toml").expect("Config.toml not found!");
     let config: Config = toml::from_str(&config_str).expect("Invalid config.toml");
 
-    let violations = fetch_violations(DAYS_BACK, &config.api_token)?;
+    let violations = fetch_violations(&config.api_token)?;
     let by_building = group_by_building(&violations);
 
     let bbls: Vec<String> = by_building.keys().cloned().collect();
@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let site_data = SiteData {
         generated_at: Utc::now().to_rfc3339(),
-        days_back: DAYS_BACK,
+        snapshot_description: "all currently open HPD violations".to_string(),
         buildings,
     };
 
@@ -82,16 +82,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn fetch_violations(
-    days_back: i64,
-    api_token: &str,
-) -> Result<Vec<Violation>, Box<dyn std::error::Error>> {
+fn fetch_violations(api_token: &str) -> Result<Vec<Violation>, Box<dyn std::error::Error>> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
         .build()?;
 
     let local = Local::now();
-    let cutoff = local - Duration::days(days_back);
+    let cutoff = local - Duration::days(DAYS_BACK);
     let date_string = cutoff.format("%Y-%m-%d").to_string();
 
     let mut all_violations = Vec::new();
@@ -102,14 +99,15 @@ fn fetch_violations(
     spinner.set_message("Fetching violations...");
 
     loop {
+        let where_clause = format!(
+            "approveddate > '{}' AND violationstatus='Open'",
+            date_string
+        );
         let response = client
             .get("https://data.cityofnewyork.us/resource/wvxf-dwi5.json")
             .header("X-App-Token", api_token)
             .query(&[
-                (
-                    "$where",
-                    format!("approveddate > '{}'", date_string).as_str(),
-                ),
+                ("$where", where_clause.as_str()),
                 ("$limit", "1000"),
                 ("$offset", &offset.to_string()),
             ])
@@ -185,7 +183,7 @@ fn group_by_building(violations: &[Violation]) -> HashMap<String, BuildingAccumu
 #[derive(Serialize)]
 struct SiteData {
     generated_at: String,
-    days_back: i64,
+    snapshot_description: String,
     buildings: Vec<BuildingOutput>,
 }
 

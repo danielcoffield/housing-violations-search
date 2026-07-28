@@ -61,7 +61,6 @@ async function init() {
     const data = await res.json();
 
     buildings = data.buildings || [];
-    document.getElementById("days-back").textContent = data.days_back ?? "30";
     document.getElementById("gen-date").textContent = formatGeneratedDate(data.generated_at);
 
     flatRecords = flatten(buildings);
@@ -250,8 +249,7 @@ function runSearch(query) {
     return;
   }
 
-  const hits = fuse
-    .search(query, { limit: SEARCH_RESULT_LIMIT * 3 })
+  const hits = searchRecords(query)
     .filter((hit) => matchesUnitRange(hit.item.unit_count) && selectedClasses.has(hit.item.class));
 
   if (!hits.length) {
@@ -360,6 +358,19 @@ document.querySelectorAll(".hint button").forEach((btn) => {
     runSearch(qEl.value);
   });
 });
+
+function searchRecords(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return flatRecords
+    .filter(
+      (r) =>
+        r.description.toLowerCase().includes(q) ||
+        r.address.toLowerCase().includes(q) ||
+        r.apartment.toLowerCase().includes(q)
+    )
+    .map((item) => ({ item }));
+}
 
 resultsEl.addEventListener(
   "toggle",
