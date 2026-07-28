@@ -191,6 +191,46 @@
       cursor: pointer;
     }
 
+    fieldset.filters.chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    fieldset.filters.chips legend {
+      width: 100%;
+    }
+
+    .chip {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--ink);
+      padding: 5px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      user-select: none;
+      margin: 0;
+    }
+
+    .chip input {
+      position: absolute;
+      opacity: 0;
+      width: 1px;
+      height: 1px;
+    }
+
+    .chip:has(input:checked) {
+      background: var(--ink);
+      color: var(--bg);
+    }
+
+    .chip:has(input:focus-visible) {
+      outline: 2px solid var(--ink);
+      outline-offset: 2px;
+    }
+
     #status {
       font-size: 13px;
       color: var(--ink-soft);
@@ -336,20 +376,21 @@
       <button data-q="lead paint">Lead Paint</button>
     </p>
 
-    <fieldset class="filters">
+    <fieldset class="filters chips">
       <legend>Borough</legend>
-      <label><input type="checkbox" class="f-boro" value="MANHATTAN" checked> Manhattan</label>
-      <label><input type="checkbox" class="f-boro" value="BRONX" checked> Bronx</label>
-      <label><input type="checkbox" class="f-boro" value="BROOKLYN" checked> Brooklyn</label>
-      <label><input type="checkbox" class="f-boro" value="QUEENS" checked> Queens</label>
-      <label><input type="checkbox" class="f-boro" value="STATEN ISLAND" checked> Staten Island</label>
+      <label class="chip"><input type="checkbox" class="f-boro" value="MANHATTAN" checked> Manhattan</label>
+      <label class="chip"><input type="checkbox" class="f-boro" value="BRONX" checked> Bronx</label>
+      <label class="chip"><input type="checkbox" class="f-boro" value="BROOKLYN" checked> Brooklyn</label>
+      <label class="chip"><input type="checkbox" class="f-boro" value="QUEENS" checked> Queens</label>
+      <label class="chip"><input type="checkbox" class="f-boro" value="STATEN ISLAND" checked> Staten Island</label>
     </fieldset>
 
-    <fieldset class="filters">
+    <fieldset class="filters chips">
       <legend>Class</legend>
-      <label><input type="checkbox" class="f-class" value="A" checked> A — non-hazardous</label>
-      <label><input type="checkbox" class="f-class" value="B" checked> B — hazardous</label>
-      <label><input type="checkbox" class="f-class" value="C" checked> C — immediately hazardous</label>
+      <label class="chip"><input type="checkbox" class="f-class" value="A" checked> A &mdash; non-hazardous</label>
+      <label class="chip"><input type="checkbox" class="f-class" value="B" checked> B &mdash; hazardous</label>
+      <label class="chip"><input type="checkbox" class="f-class" value="C" checked> C &mdash; immediately
+        hazardous</label>
     </fieldset>
 
     <div class="range-row">
