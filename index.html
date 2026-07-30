@@ -136,27 +136,49 @@
       opacity: 0.6;
     }
 
-    .range-row {
-      margin: 0 0 24px;
-      font-size: 13px;
-      color: var(--ink-soft);
+    .range-field {
+      display: inline-flex;
     }
 
-    .range-row label {
+    .range-input,
+    .range-sep {
+      border: 1px solid var(--ink);
+      padding: 3px 9px;
+      font-size: 12px;
+      font-family: var(--sans);
+      color: var(--ink);
+      background: var(--bg);
+      border-radius: 0;
+      margin-left: -1px;
+    }
+
+    .range-field>*:first-child {
+      margin-left: 0;
+    }
+
+    .range-sep {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
     }
 
-    .range-row input[type="number"] {
-      width: 80px;
-      font-family: var(--sans);
-      font-size: 14px;
-      padding: 6px 8px;
-      border: 1px solid var(--ink);
-      background: var(--bg);
-      color: var(--ink);
-      border-radius: 0;
+    .filter-row-pair {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .filter-row-pair .filters.chips {
+      margin-bottom: 0;
+    }
+
+    .range-input {
+      width: 130px;
+    }
+
+    .range-input--narrow {
+      width: 70px;
     }
 
     fieldset.filters {
@@ -194,24 +216,48 @@
     fieldset.filters.chips {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 0;
       align-items: center;
     }
 
-    fieldset.filters.chips legend {
-      width: 100%;
+
+    .chip-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      margin-right: 10px;
     }
+
 
     .chip {
       position: relative;
       display: inline-flex;
       align-items: center;
       border: 1px solid var(--ink);
-      padding: 5px 12px;
-      font-size: 13px;
+      padding: 3px 9px;
+      font-size: 12px;
       cursor: pointer;
       user-select: none;
-      margin: 0;
+      margin: 0 0 0 -1px;
+    }
+
+    .chip:first-child {
+      margin-left: 0;
+    }
+
+    fieldset.filters.chips .chip {
+      margin: 0 0 0 -1px;
+    }
+
+    fieldset.filters.chips .chip:first-child {
+      margin-left: 0;
+    }
+
+    .chip:hover,
+    .chip:has(input:focus-visible) {
+      z-index: 1;
     }
 
     .chip input {
@@ -363,21 +409,23 @@
     </header>
 
     <div class="search-row">
-      <input id="q" type="text" placeholder="Search an issue, address, or apartment…" autocomplete="off" />
+      <input id="q" type="text" placeholder="Search an address…" autocomplete="off" />
     </div>
 
-    <p class="hint">
-      <button data-q="mice">Mice</button>
-      <button data-q="rats">Rats</button>
-      <button data-q="mold">Mold</button>
-      <button data-q="no heat">No Heat</button>
-      <button data-q="roaches">Roaches</button>
-      <button data-q="fire damage">Fire Damage</button>
-      <button data-q="lead paint">Lead Paint</button>
-    </p>
+    <fieldset class="filters chips">
+      <span class="chip-label">Issue</span>
+      <label class="chip"><input type="checkbox" class="f-issue" value="mice" checked> Mice</label>
+      <label class="chip"><input type="checkbox" class="f-issue" value="rats" checked> Rats</label>
+      <label class="chip"><input type="checkbox" class="f-issue" value="mold" checked> Mold</label>
+      <label class="chip"><input type="checkbox" class="f-issue" value="no-heat" checked> No Heat</label>
+      <label class="chip"><input type="checkbox" class="f-issue" value="roaches" checked> Roaches</label>
+      <label class="chip"><input type="checkbox" class="f-issue" value="fire-damage" checked> Fire Damage</label>
+      <label class="chip"><input type="checkbox" class="f-issue" value="lead-paint" checked> Lead Paint</label>
+      <label class="chip"><input type="checkbox" class="f-issue" value="other" checked> Other</label>
+    </fieldset>
 
     <fieldset class="filters chips">
-      <legend>Borough</legend>
+      <span class="chip-label">Borough</span>
       <label class="chip"><input type="checkbox" class="f-boro" value="MANHATTAN" checked> Manhattan</label>
       <label class="chip"><input type="checkbox" class="f-boro" value="BRONX" checked> Bronx</label>
       <label class="chip"><input type="checkbox" class="f-boro" value="BROOKLYN" checked> Brooklyn</label>
@@ -386,22 +434,34 @@
     </fieldset>
 
     <fieldset class="filters chips">
-      <legend>Class</legend>
-      <label class="chip"><input type="checkbox" class="f-class" value="A" checked> A &mdash; non-hazardous</label>
-      <label class="chip"><input type="checkbox" class="f-class" value="B" checked> B &mdash; hazardous</label>
-      <label class="chip"><input type="checkbox" class="f-class" value="C" checked> C &mdash; immediately
-        hazardous</label>
+      <span class="chip-label">Class</span>
+      <label class="chip"><input type="checkbox" class="f-class" value="A" checked> A &mdash; Non-hazardous</label>
+      <label class="chip"><input type="checkbox" class="f-class" value="B" checked> B &mdash; Hazardous</label>
+      <label class="chip"><input type="checkbox" class="f-class" value="C" checked> C &mdash; Immediately
+        Hazardous</label>
     </fieldset>
 
-    <div class="range-row">
-      <label>Units:
-        <input id="min-units" type="number" min="0" placeholder="min" />
-      </label>
-      to
-      <label>
-        <input id="max-units" type="number" min="0" placeholder="max" />
-      </label>
+
+    <div class="filter-row-pair">
+      <div class="filters chips">
+        <span class="chip-label">Date</span>
+        <div class="range-field">
+          <input id="min-date" type="date" class="range-input" />
+          <span class="range-sep">to</span>
+          <input id="max-date" type="date" class="range-input" />
+        </div>
+      </div>
+
+      <div class="filters chips">
+        <span class="chip-label">Units</span>
+        <div class="range-field">
+          <input id="min-units" type="number" min="0" placeholder="min" class="range-input range-input--narrow" />
+          <span class="range-sep">to</span>
+          <input id="max-units" type="number" min="0" placeholder="max" class="range-input range-input--narrow" />
+        </div>
+      </div>
     </div>
+
 
     <p id="status">Loading violations data…</p>
     <div id="results"></div>

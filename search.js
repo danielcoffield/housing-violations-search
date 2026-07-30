@@ -1,6 +1,5 @@
 const DATA_URL = "data/violations.json";
 const DEFAULT_VIEW_LIMIT = 40;
-const SEARCH_RESULT_LIMIT = 60;
 
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
@@ -8,9 +7,35 @@ const qEl = document.getElementById("q");
 const minUnitsEl = document.getElementById("min-units");
 const maxUnitsEl = document.getElementById("max-units");
 
+
+const ISSUE_CATEGORIES = [
+  { id: "mice", pattern: /\bmice\b/i },
+  { id: "rats", pattern: /\brats?\b/i },
+  { id: "mold", pattern: /\bmold\b/i },
+  { id: "no-heat", pattern: /\b(heat|hot water)\b/i },
+  { id: "roaches", pattern: /\broaches?\b/i },
+  { id: "fire-damage", pattern: /fire damage/i },
+  { id: "lead-paint", pattern: /\blead\b/i },
+];
+const ALL_ISSUE_IDS = [...ISSUE_CATEGORIES.map((c) => c.id), "other"];
+
+document.querySelectorAll(".f-issue").forEach((cb) => { cb.checked = true; });
+let selectedIssues = new Set(
+  Array.from(document.querySelectorAll(".f-issue:checked")).map((el) => el.value)
+);
+
+function issueNote() {
+  if (selectedIssues.size === ALL_ISSUE_IDS.length) return "";
+  return selectedIssues.size ? ` · issue ${[...selectedIssues].join("/")}` : " · no issue selected";
+}
+
+function violationMatchesIssues(v) {
+  const matched = ISSUE_CATEGORIES.filter((c) => c.pattern.test(v.description));
+  if (!matched.length) return selectedIssues.has("other");
+  return matched.some((c) => selectedIssues.has(c.id));
+}
+
 let buildings = [];
-let flatRecords = [];
-let fuse = null;
 
 function getUnitBounds() {
   const minRaw = minUnitsEl.value.trim();
@@ -23,6 +48,29 @@ function getUnitBounds() {
   };
 }
 
+const minDateEl = document.getElementById("min-date");
+const maxDateEl = document.getElementById("max-date");
+
+function getDateBounds() {
+  const min = minDateEl.value.trim() || null;
+  const max = maxDateEl.value.trim() || null;
+  return { min, max };
+}
+
+function matchesDateRange(approvedDate) {
+  const { min, max } = getDateBounds();
+  if (min == null && max == null) return true;
+  const d = approvedDate.slice(0, 10);
+  if (min != null && d < min) return false;
+  if (max != null && d > max) return false;
+  return true;
+}
+
+function dateRangeNote() {
+  const { min, max } = getDateBounds();
+  if (min == null && max == null) return "";
+  return ` · ${min ?? "any"}–${max ?? "any"}`;
+}
 
 function matchesUnitRange(unitCount) {
   const { min, max } = getUnitBounds();
@@ -75,47 +123,11 @@ async function init() {
     buildings = data.buildings || [];
     document.getElementById("gen-date").textContent = formatGeneratedDate(data.generated_at);
 
-    flatRecords = flatten(buildings);
-    fuse = new Fuse(flatRecords, {
-      keys: [
-        { name: "description", weight: 0.6 },
-        { name: "address", weight: 0.25 },
-        { name: "apartment", weight: 0.15 },
-      ],
-      threshold: 0.32,
-      ignoreLocation: true,
-      minMatchCharLength: 2,
-      includeMatches: true,
-    });
-
-    renderDefault();
+    renderResults();
   } catch (err) {
     console.error(err);
-    statusEl.textContent = "Couldn't load violations data. Try refreshing.";
+    statusEl.textContent = "couldn't load violations. try refresh."
   }
-}
-
-function flatten(buildings) {
-  const out = [];
-  for (const b of buildings) {
-    for (const apt of b.apartments) {
-      for (const v of apt.violations) {
-        out.push({
-          bbl: b.bbl,
-          address: b.address,
-          boro: b.boro,
-          unit_count: b.unit_count,
-          bin: b.bin,
-          apartment: apt.apartment,
-          violation_id: v.violation_id,
-          class: v.class,
-          approved_date: v.approved_date,
-          description: v.description,
-        });
-      }
-    }
-  }
-  return out;
 }
 
 function formatGeneratedDate(iso) {
@@ -139,7 +151,12 @@ function formatDensity(b) {
 function filteredBuildingView(b) {
   const apartments = [];
   for (const apt of b.apartments) {
-    const viols = apt.violations.filter((v) => selectedClasses.has(v.class));
+    const viols = apt.violations.filter(
+      (v) =>
+        selectedClasses.has(v.class) &&
+        matchesDateRange(v.approved_date) &&
+        violationMatchesIssues(v)
+    );
     if (viols.length) apartments.push({ apartment: apt.apartment, violations: viols });
   }
   const count = apartments.length;
@@ -161,30 +178,33 @@ function rankBuildings(candidates, limit) {
   return preFiltered.slice(0, limit);
 }
 
-function renderDefault() {
+
+function matchesAddressQuery(address) {
+  const q = qEl.value.trim().toLowerCase();
+  return !q || address.toLowerCase().includes(q);
+}
+
+function renderResults() {
   const entries = [];
   for (const b of buildings) {
     if (!matchesUnitRange(b.unit_count)) continue;
     if (!selectedBoros.has(b.boro)) continue;
+    if (!matchesAddressQuery(b.address)) continue;
     const { apartments, count, density } = filteredBuildingView(b);
     if (count === 0) continue;
     entries.push({
-      bbl: b.bbl,
-      address: b.address,
-      boro: b.boro,
-      unit_count: b.unit_count,
-      bin: b.bin,
-      apartments,
-      hazard_apartment_count: count,
-      hazard_density_score: density,
+      bbl: b.bbl, address: b.address, boro: b.boro, unit_count: b.unit_count,
+      bin: b.bin, apartments, hazard_apartment_count: count, hazard_density_score: density,
     });
   }
 
   const top = rankBuildings(entries, DEFAULT_VIEW_LIMIT);
+  const q = qEl.value.trim();
+  const matchNote = q ? ` matching "${escapeHtml(q)}"` : "";
 
   statusEl.textContent = entries.length
-    ? `${entries.length.toLocaleString()} buildings${unitRangeNote()}${classNote()}${boroNote()} — showing highest violations-per-unit first.`
-    : `No buildings match the current filters${unitRangeNote()}${classNote()}${boroNote()}.`;
+    ? `${entries.length.toLocaleString()} buildings${matchNote} — showing highest violations-per-unit first.`
+    : `No buildings match the current filters${matchNote}.`;
 
   resultsEl.innerHTML = top.map((b) => buildingCard(b, b.apartments)).join("");
 }
@@ -237,117 +257,23 @@ function escapeHtml(s) {
   }[c]));
 }
 
-function highlightQuery(text, query) {
-  const words = query.trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return escapeHtml(text);
-
-  const escapedWords = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const pattern = new RegExp(`(${escapedWords.join("|")})`, "gi");
-
-  let result = "";
-  let lastIndex = 0;
-  let match;
-  while ((match = pattern.exec(text)) !== null) {
-    result += escapeHtml(text.slice(lastIndex, match.index));
-    result += `<mark>${escapeHtml(match[0])}</mark>`;
-    lastIndex = match.index + match[0].length;
-  }
-  result += escapeHtml(text.slice(lastIndex));
-  return result;
-}
-
-function runSearch(query) {
-  if (!query.trim()) {
-    renderDefault();
-    return;
-  }
-
-  const hits = searchRecords(query)
-    .filter((hit) => matchesUnitRange(hit.item.unit_count) && selectedClasses.has(hit.item.class) && selectedBoros.has(hit.item.boro));
-
-  if (!hits.length) {
-    statusEl.textContent = `No matches for "${query}"${unitRangeNote()}${classNote()}${boroNote()}.`;
-    resultsEl.innerHTML = `<div class="empty">No violations matched "${escapeHtml(query)}" with the current filters. Try a broader term or fewer filters.</div>`;
-    return;
-  }
-
-  const byBbl = new Map();
-  for (const hit of hits) {
-    const rec = hit.item;
-    if (!byBbl.has(rec.bbl)) {
-      byBbl.set(rec.bbl, {
-        bbl: rec.bbl,
-        address: rec.address,
-        boro: rec.boro,
-        unit_count: rec.unit_count,
-        bin: rec.bin,
-        apartments: new Map(),
-      });
-    }
-    const entry = byBbl.get(rec.bbl);
-    if (!entry.apartments.has(rec.apartment)) entry.apartments.set(rec.apartment, []);
-    entry.apartments.get(rec.apartment).push({
-      violation_id: rec.violation_id,
-      class: rec.class,
-      description: rec.description,
-    });
-  }
-
-  const candidates = Array.from(byBbl.values()).map((entry) => {
-    const count = entry.apartments.size;
-    const density = entry.unit_count != null && entry.unit_count > 0 ? count / entry.unit_count : null;
-    return { ...entry, hazard_apartment_count: count, hazard_density_score: density };
-  });
-
-  const grouped = rankBuildings(candidates, SEARCH_RESULT_LIMIT);
-
-  if (!grouped.length) {
-    statusEl.textContent = `No matches for "${query}".`;
-    resultsEl.innerHTML = `<div class="empty">No violations matched "${escapeHtml(query)}". Try a broader term.</div>`;
-    return;
-  }
-
-  statusEl.textContent = `${grouped.length} building${grouped.length === 1 ? "" : "s"} matching "${query}"${unitRangeNote()}${classNote()}${boroNote()} (of ${buildings.length.toLocaleString()} total).`;
-
-  resultsEl.innerHTML = grouped
-    .map((building) => {
-      const aptsHtml = Array.from(building.apartments.entries())
-        .map(
-          ([apt, viols]) => viols
-            .map(
-              (v) => `
-          <div class="viol">
-            <span class="viol-tag">[${v.class}]</span>
-            <span class="viol-apt">Apt ${escapeHtml(apt)}</span>${highlightQuery(v.description, query)}
-          </div>`
-            )
-            .join("")
-        )
-        .join("");
-
-      return `
-      <details class="card" data-bbl="${escapeHtml(building.bbl)}">
-        <summary class="card-top">
-          <span class="address"><a href="${buildJustFixUrl(building.boro, building.address)}" target="_blank" rel="noopener">${escapeHtml(building.address)}</a></span>
-          <span class="meta">${escapeHtml(building.boro)}</span>
-        </summary>
-        <div class="density">${formatDensity(building)}</div>
-        <div class="viol-list">${aptsHtml}</div>
-      </details>`;
-    })
-    .join("");
-}
-
 let debounceTimer;
 qEl.addEventListener("input", () => {
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => runSearch(qEl.value), 150);
+  debounceTimer = setTimeout(() => renderResults(), 150);
 });
 
 [minUnitsEl, maxUnitsEl].forEach((el) => {
   el.addEventListener("input", () => {
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => runSearch(qEl.value), 150);
+    debounceTimer = setTimeout(() => renderResults(), 150);
+  });
+});
+
+[minDateEl, maxDateEl].forEach((el) => {
+  el.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => renderResults(), 150);
   });
 });
 
@@ -356,7 +282,16 @@ document.querySelectorAll(".f-class").forEach((cb) => {
     selectedClasses = new Set(
       Array.from(document.querySelectorAll(".f-class:checked")).map((el) => el.value)
     );
-    runSearch(qEl.value);
+    renderResults();
+  });
+});
+
+document.querySelectorAll(".f-issue").forEach((cb) => {
+  cb.addEventListener("change", () => {
+    selectedIssues = new Set(
+      Array.from(document.querySelectorAll(".f-issue:checked")).map((el) => el.value)
+    );
+    renderResults();
   });
 });
 
@@ -365,7 +300,7 @@ document.querySelectorAll(".f-boro").forEach((cb) => {
     selectedBoros = new Set(
       Array.from(document.querySelectorAll(".f-boro:checked")).map((el) => el.value)
     );
-    runSearch(qEl.value);
+    renderResults();
   });
 });
 
@@ -373,22 +308,11 @@ document.querySelectorAll(".hint button").forEach((btn) => {
   btn.addEventListener("click", () => {
     qEl.value = btn.dataset.q;
     qEl.focus();
-    runSearch(qEl.value);
+    renderResults();
   });
 });
 
-function searchRecords(query) {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  return flatRecords
-    .filter(
-      (r) =>
-        r.description.toLowerCase().includes(q) ||
-        r.address.toLowerCase().includes(q) ||
-        r.apartment.toLowerCase().includes(q)
-    )
-    .map((item) => ({ item }));
-}
+
 
 resultsEl.addEventListener(
   "toggle",
