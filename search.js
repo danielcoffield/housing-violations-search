@@ -19,6 +19,52 @@ const ISSUE_CATEGORIES = [
 ];
 const ALL_ISSUE_IDS = [...ISSUE_CATEGORIES.map((c) => c.id), "other"];
 
+const ISSUE_LABELS = {
+  mice: "Mice",
+  rats: "Rats",
+  mold: "Mold",
+  "no-heat": "No Heat",
+  roaches: "Roaches",
+  "fire-damage": "Fire Damage",
+  "lead-paint": "Lead Paint",
+  other: "Other",
+};
+
+function buildIssueBreakdown(b) {
+  const relevantApts = [];
+  for (const apt of b.apartments) {
+    const viols = apt.violations.filter(
+      (v) => selectedClasses.has(v.class) && matchesDateRange(v.approved_date)
+    );
+    if (viols.length) relevantApts.push(viols);
+  }
+
+  // Iterate in menu order (Mice, Rats, Mold, ..., Other last) rather than
+  // sorting by count, so the breakdown always reads in the same order the
+  // filter chips are shown in.
+  const orderedIds = [...ISSUE_CATEGORIES.map((c) => c.id), "other"];
+
+  const rows = [];
+  for (const issueId of orderedIds) {
+    if (!selectedIssues.has(issueId)) continue;
+
+    let matchCount;
+    if (issueId === "other") {
+      matchCount = relevantApts.filter((viols) =>
+        viols.some((v) => !ISSUE_CATEGORIES.some((c) => c.pattern.test(v.description)))
+      ).length;
+    } else {
+      const cat = ISSUE_CATEGORIES.find((c) => c.id === issueId);
+      matchCount = relevantApts.filter((viols) => viols.some((v) => cat.pattern.test(v.description))).length;
+    }
+    if (matchCount === 0) continue;
+    const pct = b.unit_count != null && b.unit_count > 0 ? Math.round((matchCount / b.unit_count) * 100) : null;
+    rows.push({ label: ISSUE_LABELS[issueId] ?? issueId, count: matchCount, pct });
+  }
+
+  return rows;
+}
+
 document.querySelectorAll(".f-issue").forEach((cb) => { cb.checked = true; });
 let selectedIssues = new Set(
   Array.from(document.querySelectorAll(".f-issue:checked")).map((el) => el.value)
@@ -121,7 +167,7 @@ async function init() {
     const data = await res.json();
 
     buildings = data.buildings || [];
-    document.getElementById("gen-date").textContent = formatGeneratedDate(data.generated_at);
+    // document.getElementById("gen-date").textContent = formatGeneratedDate(data.generated_at);
 
     renderResults();
   } catch (err) {
@@ -129,7 +175,7 @@ async function init() {
     statusEl.textContent = "couldn't load violations. try refresh."
   }
 }
-
+/*
 function formatGeneratedDate(iso) {
   if (!iso) return "—";
   try {
@@ -139,6 +185,7 @@ function formatGeneratedDate(iso) {
     return iso;
   }
 }
+  */
 
 function formatDensity(b) {
   if (b.hazard_density_score == null) {
@@ -195,48 +242,45 @@ function renderResults() {
     entries.push({
       bbl: b.bbl, address: b.address, boro: b.boro, unit_count: b.unit_count,
       bin: b.bin, apartments, hazard_apartment_count: count, hazard_density_score: density,
+      raw: b,
     });
   }
 
   const top = rankBuildings(entries, DEFAULT_VIEW_LIMIT);
   const q = qEl.value.trim();
-  const matchNote = q ? ` matching "${escapeHtml(q)}"` : "";
+  const matchNote = q ? "" : "";
 
   statusEl.textContent = entries.length
-    ? `${entries.length.toLocaleString()} buildings${matchNote} — showing highest violations-per-unit first.`
+    ? `${entries.length.toLocaleString()} buildings${matchNote} match the current filters.`
     : `No buildings match the current filters${matchNote}.`;
 
-  resultsEl.innerHTML = top.map((b) => buildingCard(b, b.apartments)).join("");
+  resultsEl.innerHTML = top.map((entry) => buildingCard(entry)).join("");
 }
 
-function buildingCard(b, apartments, matchedViolationIds) {
-  const aptsHtml = apartments
-    .map((apt) => {
-      const viols = apt.violations
-        .filter((v) => !matchedViolationIds || matchedViolationIds.has(v.violation_id))
-        .slice(0, 6)
-        .map(
-          (v) => `
+function buildingCard(entry) {
+  const breakdown = buildIssueBreakdown(entry.raw);
+  const breakdownHtml = breakdown.length
+    ? breakdown
+      .map(
+        (r) => `
         <div class="viol">
-          <span class="viol-tag">[${v.class}]</span>
-          <span class="viol-apt">Apt ${escapeHtml(apt.apartment)}</span>${escapeHtml(v.description)}
+          <span class="viol-tag">${escapeHtml(r.label)}:</span>
+          ${r.count} of ${entry.unit_count ?? "?"} unit${entry.unit_count === 1 ? "" : "s"}${r.pct != null ? ` (<b>${r.pct}%</b>)` : ""}
         </div>`
-        )
-        .join("");
-      return viols;
-    })
-    .join("");
+      )
+      .join("")
+    : `<div class="empty">No matching issues for the current filters.</div>`;
 
-  const addressHtml = `<a href="${buildJustFixUrl(b.boro, b.address)}" target="_blank" rel="noopener">${escapeHtml(b.address)}</a>`;
+  const addressHtml = `<a href="${buildJustFixUrl(entry.boro, entry.address)}" target="_blank" rel="noopener">${escapeHtml(entry.address)}</a>`;
 
   return `
-    <details class="card" data-bbl="${escapeHtml(b.bbl)}">
+    <details class="card" data-bbl="${escapeHtml(entry.bbl)}">
       <summary class="card-top">
         <span class="address">${addressHtml}</span>
-        <span class="meta">${escapeHtml(b.boro)}</span>
+        <span class="meta">${escapeHtml(entry.boro)}</span>
       </summary>
-      <div class="density">${formatDensity(b)}</div>
-      <div class="viol-list">${aptsHtml}</div>
+      <div class="density">${formatDensity(entry)}</div>
+      <div class="viol-list">${breakdownHtml}</div>
     </details>`;
 }
 
